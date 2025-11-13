@@ -32,13 +32,14 @@ ddtelemetry = { git = "https://github.com/Datadog/libdatadog", rev = "f9ac67036c
 ddcommon = { git = "https://github.com/Datadog/libdatadog", rev = "f9ac67036ce7391903706fbb433fc5feec19eb95", default-features = false }
 
 futures = "0.3.31"
-opentelemetry_sdk = { version = "0.31.0", features = [
+opentelemetry_sdk = { path = "../opentelemetry-rust/opentelemetry-sdk", features = [
+    "trace",
+    "logs",
+], default-features = false }
+opentelemetry = { path = "../opentelemetry-rust/opentelemetry", features = [
     "trace",
 ], default-features = false }
-opentelemetry = { version = "0.31.0", features = [
-    "trace",
-], default-features = false }
-opentelemetry-semantic-conventions = { version = "0.31.0", features = [
+opentelemetry-semantic-conventions = { path = "../opentelemetry-rust/opentelemetry-semantic-conventions", features = [
     "semconv_experimental",
 ] }
 tokio = { version = "1.44.1" }
@@ -59,3 +60,13 @@ codegen-units = 1
 debug = false
 incremental = false
 opt-level = 3
+
+[patch.crates-io]
+opentelemetry = { path = "../opentelemetry-rust/opentelemetry" }
+opentelemetry_sdk = { path = "../opentelemetry-rust/opentelemetry-sdk" }
+opentelemetry-semantic-conventions = { path = "../opentelemetry-rust/opentelemetry-semantic-conventions" }
+opentelemetry-appender-tracing = { path = "../opentelemetry-rust/opentelemetry-appender-tracing" }
+opentelemetry-http = { path = "../opentelemetry-rust/opentelemetry-http" }
+opentelemetry-stdout = { path = "../opentelemetry-rust/opentelemetry-stdout" }
+opentelemetry-otlp = { path = "../opentelemetry-rust/opentelemetry-otlp" }
+opentelemetry-proto = { path = "../opentelemetry-rust/opentelemetry-proto" }
