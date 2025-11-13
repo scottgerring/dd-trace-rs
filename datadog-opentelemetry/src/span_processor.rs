@@ -926,10 +926,11 @@ mod tests {
     }
 
     fn create_test_span_data(trace_id: [u8; 16], span_id: [u8; 8]) -> SpanData {
+        let span_id = SpanId::from_bytes(span_id);
         SpanData {
             span_context: SpanContext::new(
                 TraceId::from_bytes(trace_id),
-                SpanId::from_bytes(span_id),
+                span_id,
                 TraceFlags::default(),
                 false,
                 Default::default(),
@@ -945,7 +946,6 @@ mod tests {
             links: SpanLinks::default(),
             status: opentelemetry::trace::Status::Unset,
             instrumentation_scope: Default::default(),
-            parent_span_is_remote: false,
         }
     }
 

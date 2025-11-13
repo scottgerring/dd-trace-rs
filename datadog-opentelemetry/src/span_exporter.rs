@@ -772,7 +772,6 @@ mod tests {
             dropped_attributes_count: 0,
             span_kind: opentelemetry::trace::SpanKind::Internal,
             instrumentation_scope: opentelemetry::InstrumentationScope::default(),
-            parent_span_is_remote: false,
         }
     }
 

@@ -63,6 +63,18 @@
 //!     .init();
 //! ```
 
+pub mod context_labels;
+
+/// Type of context label writer to use
+#[derive(Debug, Clone, Copy)]
+pub enum ContextLabelWriterType {
+    /// Debug writer that logs context changes via dd-trace-rs logging
+    Logging,
+    /// Writer that uses Polar Signals custom-labels protocol for profiler integration
+    #[cfg(feature = "context-observer")]
+    Custom,
+}
+
 mod ddtrace_transform;
 mod sampler;
 mod span_exporter;
@@ -85,6 +97,7 @@ pub struct DatadogTracingBuilder {
     config: Option<dd_trace::Config>,
     resource: Option<opentelemetry_sdk::Resource>,
     tracer_provider: opentelemetry_sdk::trace::TracerProviderBuilder,
+    context_label_writer: Option<ContextLabelWriterType>,
 }
 
 impl DatadogTracingBuilder {
@@ -104,10 +117,40 @@ impl DatadogTracingBuilder {
         self
     }
 
+    /// Enable context labels propagation with the specified writer
+    ///
+    /// When enabled, trace context (trace ID, span ID, local root span ID) will be
+    /// written using the specified writer implementation whenever spans are
+    /// entered or exited.
+    ///
+    /// Available writer types:
+    /// - `ContextLabelWriterType::Logging`: - log it using dd-trace-rs logging subsystem. Debugging!
+    /// - `ContextLabelWriterType::Custom`: Uses Polar Signals custom-labels TL lib. This lets external
+    ///    processes (e.g., a profiler) introspect this process and work out what's going on.
+    ///
+    pub fn with_context_labels(mut self, writer_type: ContextLabelWriterType) -> Self {
+        self.context_label_writer = Some(writer_type);
+        self
+    }
+
     /// Initializes the Tracer Provider, and the Text Map Propagator and install
     /// them globally
     pub fn init(self) -> SdkTracerProvider {
+        let writer_type = self.context_label_writer;
         let (tracer_provider, propagator) = self.init_local();
+
+        // Initialize context labels with the specified writer type
+        if let Some(writer_type) = writer_type {
+            match writer_type {
+                ContextLabelWriterType::Logging => {
+                    context_labels::init_context_labels(context_labels::LoggingContextWriter::new());
+                }
+                #[cfg(feature = "context-observer")]
+                ContextLabelWriterType::Custom => {
+                    context_labels::init_context_labels(context_labels::CustomLabelsWriter::new());
+                }
+            }
+        }
 
         opentelemetry::global::set_text_map_propagator(propagator);
         opentelemetry::global::set_tracer_provider(tracer_provider.clone());
@@ -254,6 +297,7 @@ pub fn tracing() -> DatadogTracingBuilder {
         config: None,
         tracer_provider: opentelemetry_sdk::trace::SdkTracerProvider::builder(),
         resource: None,
+        context_label_writer: None,
     }
 }
 
@@ -268,6 +312,7 @@ pub fn init_datadog(
         config: Some(config),
         tracer_provider: tracer_provider_builder,
         resource,
+        context_label_writer: None,
     }
     .init()
 }
