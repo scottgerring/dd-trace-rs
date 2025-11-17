@@ -50,6 +50,11 @@ struct Trace {
     propagation_data: TracePropagationData,
 
     /// Metadata for active spans, keyed by span_id
+    ///
+    /// This lets us capture _more stuff_ about spans that might
+    /// be useful for enriching our observer system. Because in
+    /// observation land spans will be sampled before they are completed,
+    /// finished_spans is not useful.
     active_spans: BHashMap<[u8; 8], ActiveSpanMetadata>,
 }
 
@@ -200,9 +205,7 @@ impl InnerTraceRegistry {
             // Remove active span metadata since this span is now finished
             trace.active_spans.remove(&span_id);
 
-            let span = if !trace.finished_spans.is_empty()
-                && span_id == trace.local_root_span_id
-            {
+            let span = if !trace.finished_spans.is_empty() && span_id == trace.local_root_span_id {
                 std::mem::replace(&mut trace.finished_spans[0], span_data)
             } else {
                 span_data

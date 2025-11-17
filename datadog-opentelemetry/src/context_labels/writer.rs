@@ -16,7 +16,11 @@ pub struct TraceContext {
     /// in hexadecimal format (16 characters for 64-bit span ID)
     pub local_root_span_id: String,
 
-    /// HTTP route/path (e.g., "/do_work")
+    /// HTTP route (e.g., "/do_work")
+    /// Capturing this as an example of something that will sometimes
+    /// be there and will be useful on the reader side to make sense
+    /// of the captured thread local data, even in the absence of
+    /// a sampled trace to correlate to.
     pub http_route: Option<String>,
 }
 

@@ -32,14 +32,14 @@ ddtelemetry = { git = "https://github.com/Datadog/libdatadog", rev = "f9ac67036c
 ddcommon = { git = "https://github.com/Datadog/libdatadog", rev = "f9ac67036ce7391903706fbb433fc5feec19eb95", default-features = false }
 
 futures = "0.3.31"
-opentelemetry_sdk = { path = "../opentelemetry-rust/opentelemetry-sdk", features = [
+opentelemetry_sdk = { git = "https://github.com/bantonsson/opentelemetry-rust", branch = "ban/context-observer-test", features = [
     "trace",
     "logs",
 ], default-features = false }
-opentelemetry = { path = "../opentelemetry-rust/opentelemetry", features = [
+opentelemetry = { git = "https://github.com/bantonsson/opentelemetry-rust", branch = "ban/context-observer-test", features = [
     "trace",
 ], default-features = false }
-opentelemetry-semantic-conventions = { path = "../opentelemetry-rust/opentelemetry-semantic-conventions", features = [
+opentelemetry-semantic-conventions = { git = "https://github.com/bantonsson/opentelemetry-rust", branch = "ban/context-observer-test", features = [
     "semconv_experimental",
 ] }
 tokio = { version = "1.44.1" }
@@ -62,11 +62,11 @@ incremental = false
 opt-level = 3
 
 [patch.crates-io]
-opentelemetry = { path = "../opentelemetry-rust/opentelemetry" }
-opentelemetry_sdk = { path = "../opentelemetry-rust/opentelemetry-sdk" }
-opentelemetry-semantic-conventions = { path = "../opentelemetry-rust/opentelemetry-semantic-conventions" }
-opentelemetry-appender-tracing = { path = "../opentelemetry-rust/opentelemetry-appender-tracing" }
-opentelemetry-http = { path = "../opentelemetry-rust/opentelemetry-http" }
-opentelemetry-stdout = { path = "../opentelemetry-rust/opentelemetry-stdout" }
-opentelemetry-otlp = { path = "../opentelemetry-rust/opentelemetry-otlp" }
-opentelemetry-proto = { path = "../opentelemetry-rust/opentelemetry-proto" }
+opentelemetry = { git = "https://github.com/bantonsson/opentelemetry-rust", branch = "ban/context-observer-test" }
+opentelemetry_sdk = { git = "https://github.com/bantonsson/opentelemetry-rust", branch = "ban/context-observer-test" }
+opentelemetry-semantic-conventions = { git = "https://github.com/bantonsson/opentelemetry-rust", branch = "ban/context-observer-test" }
+opentelemetry-appender-tracing = { git = "https://github.com/bantonsson/opentelemetry-rust", branch = "ban/context-observer-test" }
+opentelemetry-http = { git = "https://github.com/bantonsson/opentelemetry-rust", branch = "ban/context-observer-test" }
+opentelemetry-stdout = { git = "https://github.com/bantonsson/opentelemetry-rust", branch = "ban/context-observer-test" }
+opentelemetry-otlp = { git = "https://github.com/bantonsson/opentelemetry-rust", branch = "ban/context-observer-test" }
+opentelemetry-proto = { git = "https://github.com/bantonsson/opentelemetry-rust", branch = "ban/context-observer-test" }
