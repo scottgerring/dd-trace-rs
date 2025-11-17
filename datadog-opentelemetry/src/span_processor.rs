@@ -35,6 +35,11 @@ use crate::{
     text_map_propagator::DatadogExtractData,
 };
 
+#[derive(Debug, Clone)]
+pub struct ActiveSpanMetadata {
+    pub http_route: Option<String>,
+}
+
 #[derive(Debug)]
 struct Trace {
     local_root_span_id: [u8; 8],
@@ -43,6 +48,9 @@ struct Trace {
     open_span_count: usize,
 
     propagation_data: TracePropagationData,
+
+    /// Metadata for active spans, keyed by span_id
+    active_spans: BHashMap<[u8; 8], ActiveSpanMetadata>,
 }
 
 #[derive(Debug, Clone)]
@@ -111,6 +119,7 @@ impl InnerTraceRegistry {
                     // sent flushed prematurely
                     open_span_count: 1,
                     propagation_data,
+                    active_spans: BHashMap::new(),
                 });
                 self.metrics.trace_segments_created += 1;
                 self.metrics.spans_created += 1;
@@ -128,6 +137,7 @@ impl InnerTraceRegistry {
             finished_spans: Vec::new(),
             open_span_count: 1,
             propagation_data: EMPTY_PROPAGATION_DATA,
+            active_spans: BHashMap::new(),
         });
         if trace.local_root_span_id == [0; 8] {
             trace.local_root_span_id = root_span_id;
@@ -159,6 +169,7 @@ impl InnerTraceRegistry {
                     finished_spans: Vec::new(),
                     open_span_count: 0,
                     propagation_data,
+                    active_spans: BHashMap::new(),
                 }
             })
             .open_span_count += 1;
@@ -184,8 +195,13 @@ impl InnerTraceRegistry {
         self.metrics.spans_finished += 1;
         if let hash_map::Entry::Occupied(mut slot) = self.registry.entry(trace_id) {
             let trace = slot.get_mut();
+            let span_id = span_data.span_context.span_id().to_bytes();
+
+            // Remove active span metadata since this span is now finished
+            trace.active_spans.remove(&span_id);
+
             let span = if !trace.finished_spans.is_empty()
-                && span_data.span_context.span_id().to_bytes() == trace.local_root_span_id
+                && span_id == trace.local_root_span_id
             {
                 std::mem::replace(&mut trace.finished_spans[0], span_data)
             } else {
@@ -206,6 +222,7 @@ impl InnerTraceRegistry {
                     finished_spans: std::mem::take(&mut trace.finished_spans),
                     open_span_count: trace.open_span_count,
                     propagation_data: trace.propagation_data.clone(),
+                    active_spans: BHashMap::new(), // Don't include active spans in partial flush
                 };
                 Some(trace)
             } else if trace.open_span_count == 0 {
@@ -231,6 +248,7 @@ impl InnerTraceRegistry {
                 finished_spans: vec![span_data],
                 open_span_count: 0,
                 propagation_data: EMPTY_PROPAGATION_DATA,
+                active_spans: BHashMap::new(),
             })
         }
     }
@@ -239,6 +257,33 @@ impl InnerTraceRegistry {
         match self.registry.get(&trace_id) {
             Some(trace) => &trace.propagation_data,
             None => &EMPTY_PROPAGATION_DATA,
+        }
+    }
+
+    fn set_active_span_metadata(
+        &mut self,
+        trace_id: [u8; 16],
+        span_id: [u8; 8],
+        metadata: ActiveSpanMetadata,
+    ) {
+        if let Some(trace) = self.registry.get_mut(&trace_id) {
+            trace.active_spans.insert(span_id, metadata);
+        }
+    }
+
+    fn get_active_span_metadata(
+        &self,
+        trace_id: [u8; 16],
+        span_id: [u8; 8],
+    ) -> Option<ActiveSpanMetadata> {
+        self.registry
+            .get(&trace_id)
+            .and_then(|trace| trace.active_spans.get(&span_id).cloned())
+    }
+
+    fn remove_active_span_metadata(&mut self, trace_id: [u8; 16], span_id: [u8; 8]) {
+        if let Some(trace) = self.registry.get_mut(&trace_id) {
+            trace.active_spans.remove(&span_id);
         }
     }
 
@@ -261,7 +306,7 @@ struct CachePadded<T>(T);
 /// - The finished spans of the trace
 /// - The number of open spans in the trace
 /// - The sampling decision of the trace
-pub(crate) struct TraceRegistry {
+pub struct TraceRegistry {
     // Example:
     // inner: Arc<[CacheAligned<RwLock<InnerTraceRegistry>>; N]>;
     // to access a trace we do inner[hash(trace_id) % N].read()
@@ -351,6 +396,60 @@ impl TraceRegistry {
             .expect("Failed to acquire lock on trace registry");
 
         inner.get_trace_propagation_data(trace_id).clone()
+    }
+
+    /// Get the local root span ID for a given trace ID
+    ///
+    /// Returns None if the trace is not registered or if the root span ID has not been set yet.
+    pub fn get_local_root_span_id(&self, trace_id: [u8; 16]) -> Option<[u8; 8]> {
+        let inner = self
+            .get_shard(trace_id)
+            .read()
+            .expect("Failed to acquire lock on trace registry");
+
+        inner.registry.get(&trace_id).and_then(|trace| {
+            if trace.local_root_span_id == [0; 8] {
+                None
+            } else {
+                Some(trace.local_root_span_id)
+            }
+        })
+    }
+
+    /// Store metadata for an active span
+    pub fn set_active_span_metadata(
+        &self,
+        trace_id: [u8; 16],
+        span_id: [u8; 8],
+        metadata: ActiveSpanMetadata,
+    ) {
+        let mut inner = self
+            .get_shard(trace_id)
+            .write()
+            .expect("Failed to acquire lock on trace registry");
+        inner.set_active_span_metadata(trace_id, span_id, metadata);
+    }
+
+    /// Get metadata for an active span
+    pub fn get_active_span_metadata(
+        &self,
+        trace_id: [u8; 16],
+        span_id: [u8; 8],
+    ) -> Option<ActiveSpanMetadata> {
+        let inner = self
+            .get_shard(trace_id)
+            .read()
+            .expect("Failed to acquire lock on trace registry");
+        inner.get_active_span_metadata(trace_id, span_id)
+    }
+
+    /// Remove metadata for a span that has finished
+    fn remove_active_span_metadata(&self, trace_id: [u8; 16], span_id: [u8; 8]) {
+        let mut inner = self
+            .get_shard(trace_id)
+            .write()
+            .expect("Failed to acquire lock on trace registry");
+        inner.remove_active_span_metadata(trace_id, span_id);
     }
 
     pub fn get_metrics(&self) -> TraceRegistryMetrics {
@@ -525,6 +624,21 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
             self.registry
                 .register_span(trace_id, span_id, EMPTY_PROPAGATION_DATA);
         }
+
+        // Extract and store metadata for active span
+        // This allows context observers to access it before the span finishes
+        let http_route = span.exported_data().and_then(|data| {
+            // Extract http.route
+            data.attributes
+                .iter()
+                .find(|kv| kv.key.as_str() == "http.route" || kv.key.as_str() == "http.target")
+                .map(|kv| kv.value.as_str().to_string())
+        });
+
+        let metadata = ActiveSpanMetadata { http_route };
+
+        self.registry
+            .set_active_span_metadata(trace_id, span_id, metadata);
     }
 
     fn on_end(&self, span: SpanData) {
@@ -936,6 +1050,7 @@ mod tests {
                 Default::default(),
             ),
             parent_span_id: SpanId::INVALID,
+            parent_span_is_remote: false,
             span_kind: opentelemetry::trace::SpanKind::Internal,
             name: Cow::Borrowed("test_span"),
             start_time: std::time::SystemTime::now(),

@@ -90,8 +90,11 @@ use opentelemetry::{Key, KeyValue, Value};
 use opentelemetry_sdk::{trace::SdkTracerProvider, Resource};
 use opentelemetry_semantic_conventions::resource::{DEPLOYMENT_ENVIRONMENT_NAME, SERVICE_NAME};
 use sampler::Sampler;
-use span_processor::{DatadogSpanProcessor, TraceRegistry};
+use span_processor::DatadogSpanProcessor;
 use text_map_propagator::DatadogPropagator;
+
+// Re-export TraceRegistry and ActiveSpanMetadata for use by context observers
+pub use span_processor::{ActiveSpanMetadata, TraceRegistry};
 
 pub struct DatadogTracingBuilder {
     config: Option<dd_trace::Config>,
@@ -137,17 +140,23 @@ impl DatadogTracingBuilder {
     /// them globally
     pub fn init(self) -> SdkTracerProvider {
         let writer_type = self.context_label_writer;
-        let (tracer_provider, propagator) = self.init_local();
+        let (tracer_provider, propagator, registry) = self.init_local();
 
         // Initialize context labels with the specified writer type
         if let Some(writer_type) = writer_type {
             match writer_type {
                 ContextLabelWriterType::Logging => {
-                    context_labels::init_context_labels(context_labels::LoggingContextWriter::new());
+                    context_labels::init_context_labels(
+                        context_labels::LoggingContextWriter::new(),
+                        registry.clone(),
+                    );
                 }
                 #[cfg(feature = "context-observer")]
                 ContextLabelWriterType::Custom => {
-                    context_labels::init_context_labels(context_labels::CustomLabelsWriter::new());
+                    context_labels::init_context_labels(
+                        context_labels::CustomLabelsWriter::new(),
+                        registry.clone(),
+                    );
                 }
             }
         }
@@ -166,12 +175,12 @@ impl DatadogTracingBuilder {
     /// # Example
     ///
     /// ```rust
-    /// let (tracer_provider, propagator) = datadog_opentelemetry::tracing().init_local();
+    /// let (tracer_provider, propagator, registry) = datadog_opentelemetry::tracing().init_local();
     ///
     /// opentelemetry::global::set_text_map_propagator(propagator);
     /// opentelemetry::global::set_tracer_provider(tracer_provider.clone());
     /// ```
-    pub fn init_local(self) -> (SdkTracerProvider, DatadogPropagator) {
+    pub fn init_local(self) -> (SdkTracerProvider, DatadogPropagator, TraceRegistry) {
         let config = self
             .config
             .unwrap_or_else(|| dd_trace::Config::builder().build());
@@ -322,7 +331,7 @@ fn make_tracer(
     config: Arc<dd_trace::Config>,
     mut tracer_provider_builder: opentelemetry_sdk::trace::TracerProviderBuilder,
     resource: Option<Resource>,
-) -> (SdkTracerProvider, DatadogPropagator) {
+) -> (SdkTracerProvider, DatadogPropagator, TraceRegistry) {
     let registry = TraceRegistry::new(config.clone());
     let resource_slot = Arc::new(RwLock::new(Resource::builder_empty().build()));
     // Sampler only needs config for initialization (reads initial sampling rules)
@@ -359,7 +368,7 @@ fn make_tracer(
     }
     let tracer_provider = tracer_provider_builder.build();
 
-    (tracer_provider, propagator)
+    (tracer_provider, propagator, registry)
 }
 
 fn merge_resource<I: IntoIterator<Item = (Key, Value)>>(
@@ -430,7 +439,7 @@ fn create_dd_resource(resource: Resource, cfg: &dd_trace::Config) -> Resource {
 #[cfg(feature = "test-utils")]
 pub fn make_test_tracer(
     shared_config: Arc<dd_trace::Config>,
-) -> (SdkTracerProvider, DatadogPropagator) {
+) -> (SdkTracerProvider, DatadogPropagator, TraceRegistry) {
     make_tracer(
         shared_config,
         opentelemetry_sdk::trace::TracerProviderBuilder::default(),

@@ -55,12 +55,8 @@ impl ContextLabelWriter for CustomLabelsWriter {
         labelset.set("span_id", &context.span_id);
         labelset.set("local_root_span_id", &context.local_root_span_id);
 
-        if let Some(ref service) = context.service_name {
-            labelset.set("service", service);
-        }
-
-        if let Some(ref resource) = context.resource_name {
-            labelset.set("resource", resource);
+        if let Some(ref route) = context.http_route {
+            labelset.set("http_route", route);
         }
 
         dd_trace::dd_debug!("Labels written successfully");
@@ -83,8 +79,7 @@ impl ContextLabelWriter for CustomLabelsWriter {
         labelset.delete("trace_id");
         labelset.delete("span_id");
         labelset.delete("local_root_span_id");
-        labelset.delete("service");
-        labelset.delete("resource");
+        labelset.delete("http_route");
 
         dd_trace::dd_debug!("Labels cleared successfully");
     }

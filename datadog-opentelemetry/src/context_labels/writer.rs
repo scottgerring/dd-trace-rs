@@ -16,11 +16,8 @@ pub struct TraceContext {
     /// in hexadecimal format (16 characters for 64-bit span ID)
     pub local_root_span_id: String,
 
-    /// Service name
-    pub service_name: Option<String>,
-
-    /// Resource/operation name
-    pub resource_name: Option<String>,
+    /// HTTP route/path (e.g., "/do_work")
+    pub http_route: Option<String>,
 }
 
 impl std::fmt::Display for TraceContext {
@@ -31,12 +28,8 @@ impl std::fmt::Display for TraceContext {
             self.trace_id, self.span_id, self.local_root_span_id
         )?;
 
-        if let Some(ref service) = self.service_name {
-            write!(f, ", service={}", service)?;
-        }
-
-        if let Some(ref resource) = self.resource_name {
-            write!(f, ", resource={}", resource)?;
+        if let Some(ref route) = self.http_route {
+            write!(f, ", http_route={}", route)?;
         }
 
         Ok(())

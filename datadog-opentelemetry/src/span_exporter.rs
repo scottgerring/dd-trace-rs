@@ -762,6 +762,7 @@ mod tests {
         SpanData {
             span_context: opentelemetry::trace::SpanContext::empty_context(),
             parent_span_id: SpanId::INVALID,
+            parent_span_is_remote: false,
             name: Cow::Borrowed(""),
             start_time: std::time::SystemTime::now(),
             end_time: std::time::SystemTime::now(),
