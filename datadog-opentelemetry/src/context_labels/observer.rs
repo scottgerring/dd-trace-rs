@@ -1,7 +1,7 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use super::writer::{ContextLabelWriter, TraceContext};
+use super::writer::{ContextLabelWriter, ExtractedSpanData};
 use crate::TraceRegistry;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::{context::ContextObserver, Context};
@@ -21,16 +21,16 @@ impl<W: ContextLabelWriter> ContextLabelObserver<W> {
         Self { writer, registry }
     }
 
-    /// Extract trace context from an OTel context
+    /// Write trace context from an OTel context using zero-copy access
     ///
-    /// Returns `None` if:
+    /// Returns `false` if:
     /// - The context has no active span
     /// - The span context is invalid
     /// - The span is not sampled
     ///
-    fn extract_trace_context(&self, ctx: &Context) -> Option<TraceContext> {
+    fn write_trace_context(&self, ctx: &Context) -> bool {
         if !ctx.has_active_span() {
-            return None;
+            return false;
         }
 
         let span = ctx.span();
@@ -38,7 +38,7 @@ impl<W: ContextLabelWriter> ContextLabelObserver<W> {
 
         // Only export valid, sampled spans to reduce overhead
         if !span_context.is_valid() || !span_context.is_sampled() {
-            return None;
+            return false;
         }
 
         let trace_id = span_context.trace_id().to_bytes();
@@ -50,24 +50,44 @@ impl<W: ContextLabelWriter> ContextLabelObserver<W> {
             .get_local_root_span_id(trace_id)
             .unwrap_or(span_id);
 
-        // Get active span metadata (http route) from registry
-        let metadata = self.registry.get_active_span_metadata(trace_id, span_id);
+        // Use callback API for zero-copy access to metadata
+        #[cfg(feature = "active-span-metadata")]
+        {
+            self.registry.with_extracted_span_data(
+                trace_id,
+                span_id,
+                local_root_span_id,
+                |http_route| {
+                    let data = ExtractedSpanData {
+                        trace_id,
+                        span_id,
+                        local_root_span_id,
+                        http_route,
+                    };
+                    self.writer.write_labels(&data);
+                },
+            );
+        }
 
-        Some(TraceContext {
-            trace_id: format!("{:032x}", u128::from_be_bytes(trace_id)),
-            span_id: format!("{:016x}", u64::from_be_bytes(span_id)),
-            local_root_span_id: format!("{:016x}", u64::from_be_bytes(local_root_span_id)),
-            http_route: metadata.as_ref().and_then(|m| m.http_route.clone()),
-        })
+        #[cfg(not(feature = "active-span-metadata"))]
+        {
+            let data = ExtractedSpanData {
+                trace_id,
+                span_id,
+                local_root_span_id,
+                http_route: None,
+            };
+            self.writer.write_labels(&data);
+        }
+
+        true
     }
 }
 
 impl<W: ContextLabelWriter> ContextObserver for ContextLabelObserver<W> {
     /// Called when entering a new context
     fn on_context_enter(&self, _from: &Context, to: &Context) {
-        if let Some(trace_ctx) = self.extract_trace_context(to) {
-            self.writer.write_labels(&trace_ctx);
-        } else {
+        if !self.write_trace_context(to) {
             // No active span in the new context, clear labels
             self.writer.clear_labels();
         }
@@ -75,9 +95,7 @@ impl<W: ContextLabelWriter> ContextObserver for ContextLabelObserver<W> {
 
     /// Called when exiting to a previous context
     fn on_context_exit(&self, _from: &Context, to: &Context) {
-        if let Some(trace_ctx) = self.extract_trace_context(to) {
-            self.writer.write_labels(&trace_ctx);
-        } else {
+        if !self.write_trace_context(to) {
             // Returning to a context with no active span, clear labels
             self.writer.clear_labels();
         }

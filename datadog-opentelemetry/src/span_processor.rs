@@ -35,6 +35,7 @@ use crate::{
     text_map_propagator::DatadogExtractData,
 };
 
+#[cfg(feature = "active-span-metadata")]
 #[derive(Debug, Clone)]
 pub struct ActiveSpanMetadata {
     pub http_route: Option<String>,
@@ -55,6 +56,7 @@ struct Trace {
     /// be useful for enriching our observer system. Because in
     /// observation land spans will be sampled before they are completed,
     /// finished_spans is not useful.
+    #[cfg(feature = "active-span-metadata")]
     active_spans: BHashMap<[u8; 8], ActiveSpanMetadata>,
 }
 
@@ -124,6 +126,7 @@ impl InnerTraceRegistry {
                     // sent flushed prematurely
                     open_span_count: 1,
                     propagation_data,
+                    #[cfg(feature = "active-span-metadata")]
                     active_spans: BHashMap::new(),
                 });
                 self.metrics.trace_segments_created += 1;
@@ -142,6 +145,7 @@ impl InnerTraceRegistry {
             finished_spans: Vec::new(),
             open_span_count: 1,
             propagation_data: EMPTY_PROPAGATION_DATA,
+            #[cfg(feature = "active-span-metadata")]
             active_spans: BHashMap::new(),
         });
         if trace.local_root_span_id == [0; 8] {
@@ -174,6 +178,7 @@ impl InnerTraceRegistry {
                     finished_spans: Vec::new(),
                     open_span_count: 0,
                     propagation_data,
+                    #[cfg(feature = "active-span-metadata")]
                     active_spans: BHashMap::new(),
                 }
             })
@@ -203,6 +208,7 @@ impl InnerTraceRegistry {
             let span_id = span_data.span_context.span_id().to_bytes();
 
             // Remove active span metadata since this span is now finished
+            #[cfg(feature = "active-span-metadata")]
             trace.active_spans.remove(&span_id);
 
             let span = if !trace.finished_spans.is_empty() && span_id == trace.local_root_span_id {
@@ -225,6 +231,7 @@ impl InnerTraceRegistry {
                     finished_spans: std::mem::take(&mut trace.finished_spans),
                     open_span_count: trace.open_span_count,
                     propagation_data: trace.propagation_data.clone(),
+                    #[cfg(feature = "active-span-metadata")]
                     active_spans: BHashMap::new(), // Don't include active spans in partial flush
                 };
                 Some(trace)
@@ -251,6 +258,7 @@ impl InnerTraceRegistry {
                 finished_spans: vec![span_data],
                 open_span_count: 0,
                 propagation_data: EMPTY_PROPAGATION_DATA,
+                #[cfg(feature = "active-span-metadata")]
                 active_spans: BHashMap::new(),
             })
         }
@@ -263,6 +271,7 @@ impl InnerTraceRegistry {
         }
     }
 
+    #[cfg(feature = "active-span-metadata")]
     fn set_active_span_metadata(
         &mut self,
         trace_id: [u8; 16],
@@ -274,21 +283,17 @@ impl InnerTraceRegistry {
         }
     }
 
+    #[cfg(feature = "active-span-metadata")]
     fn get_active_span_metadata(
         &self,
         trace_id: [u8; 16],
         span_id: [u8; 8],
-    ) -> Option<ActiveSpanMetadata> {
+    ) -> Option<&ActiveSpanMetadata> {
         self.registry
             .get(&trace_id)
-            .and_then(|trace| trace.active_spans.get(&span_id).cloned())
+            .and_then(|trace| trace.active_spans.get(&span_id))
     }
 
-    fn remove_active_span_metadata(&mut self, trace_id: [u8; 16], span_id: [u8; 8]) {
-        if let Some(trace) = self.registry.get_mut(&trace_id) {
-            trace.active_spans.remove(&span_id);
-        }
-    }
 
     fn get_metrics(&mut self) -> TraceRegistryMetrics {
         std::mem::take(&mut self.metrics)
@@ -420,6 +425,7 @@ impl TraceRegistry {
     }
 
     /// Store metadata for an active span
+    #[cfg(feature = "active-span-metadata")]
     pub fn set_active_span_metadata(
         &self,
         trace_id: [u8; 16],
@@ -433,26 +439,30 @@ impl TraceRegistry {
         inner.set_active_span_metadata(trace_id, span_id, metadata);
     }
 
-    /// Get metadata for an active span
-    pub fn get_active_span_metadata(
+    /// Execute a callback with borrowed access to extracted span data
+    ///
+    /// This provides zero-copy access to trace/span IDs and metadata without
+    /// allocating or cloning. Returns None if the trace or span is not found.
+    #[cfg(feature = "active-span-metadata")]
+    pub fn with_extracted_span_data<F, R>(
         &self,
         trace_id: [u8; 16],
         span_id: [u8; 8],
-    ) -> Option<ActiveSpanMetadata> {
+        _local_root_span_id: [u8; 8],
+        f: F,
+    ) -> Option<R>
+    where
+        F: FnOnce(Option<&str>) -> R,
+    {
         let inner = self
             .get_shard(trace_id)
             .read()
             .expect("Failed to acquire lock on trace registry");
-        inner.get_active_span_metadata(trace_id, span_id)
-    }
 
-    /// Remove metadata for a span that has finished
-    fn remove_active_span_metadata(&self, trace_id: [u8; 16], span_id: [u8; 8]) {
-        let mut inner = self
-            .get_shard(trace_id)
-            .write()
-            .expect("Failed to acquire lock on trace registry");
-        inner.remove_active_span_metadata(trace_id, span_id);
+        let metadata = inner.get_active_span_metadata(trace_id, span_id);
+        let http_route = metadata.and_then(|m| m.http_route.as_deref());
+
+        Some(f(http_route))
     }
 
     pub fn get_metrics(&self) -> TraceRegistryMetrics {
@@ -630,18 +640,21 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
 
         // Extract and store metadata for active span
         // This allows context observers to access it before the span finishes
-        let http_route = span.exported_data().and_then(|data| {
-            // Extract http.route
-            data.attributes
-                .iter()
-                .find(|kv| kv.key.as_str() == "http.route" || kv.key.as_str() == "http.target")
-                .map(|kv| kv.value.as_str().to_string())
-        });
+        #[cfg(feature = "active-span-metadata")]
+        {
+            let http_route = span.exported_data().and_then(|data| {
+                // Extract http.route
+                data.attributes
+                    .iter()
+                    .find(|kv| kv.key.as_str() == "http.route" || kv.key.as_str() == "http.target")
+                    .map(|kv| kv.value.as_str().to_string())
+            });
 
-        let metadata = ActiveSpanMetadata { http_route };
+            let metadata = ActiveSpanMetadata { http_route };
 
-        self.registry
-            .set_active_span_metadata(trace_id, span_id, metadata);
+            self.registry
+                .set_active_span_metadata(trace_id, span_id, metadata);
+        }
     }
 
     fn on_end(&self, span: SpanData) {

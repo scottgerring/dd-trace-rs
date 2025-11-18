@@ -11,7 +11,7 @@ mod logging_writer;
 
 use dd_trace::dd_debug;
 pub use observer::ContextLabelObserver;
-pub use writer::{ContextLabelWriter, TraceContext};
+pub use writer::{ContextLabelWriter, ExtractedSpanData};
 
 #[cfg(feature = "context-observer")]
 pub use custom_labels_writer::CustomLabelsWriter;

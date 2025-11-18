@@ -93,8 +93,12 @@ use sampler::Sampler;
 use span_processor::DatadogSpanProcessor;
 use text_map_propagator::DatadogPropagator;
 
-// Re-export TraceRegistry and ActiveSpanMetadata for use by context observers
-pub use span_processor::{ActiveSpanMetadata, TraceRegistry};
+// Re-export TraceRegistry for use by context observers
+pub use span_processor::TraceRegistry;
+
+// Re-export ActiveSpanMetadata when the feature is enabled
+#[cfg(feature = "active-span-metadata")]
+pub use span_processor::ActiveSpanMetadata;
 
 pub struct DatadogTracingBuilder {
     config: Option<dd_trace::Config>,

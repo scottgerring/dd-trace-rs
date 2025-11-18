@@ -1,51 +1,39 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-/// Trace context extracted from OpenTelemetry Context
-/// TODO if we really want this extra layer of mapping, or not.
-/// TODO encoding trace/span ids as hex strings is rather wasteful
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TraceContext {
-    /// Full trace ID in hexadecimal format (32 characters for 128-bit trace ID)
-    pub trace_id: String,
+/// Extracted span data with zero-copy access to trace information
+///
+/// This struct provides borrowed access to raw trace and span IDs,
+/// avoiding allocations and cloning in the context switch hot path.
+/// Writers are responsible for formatting IDs as needed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExtractedSpanData<'a> {
+    /// Full trace ID as 128-bit integer (16 bytes)
+    pub trace_id: [u8; 16],
 
-    /// Current span ID in hexadecimal format (16 characters for 64-bit span ID)
-    pub span_id: String,
+    /// Current span ID as 64-bit integer (8 bytes)
+    pub span_id: [u8; 8],
 
     /// Local root span ID - the topmost span within this service for this trace
-    /// in hexadecimal format (16 characters for 64-bit span ID)
-    pub local_root_span_id: String,
+    pub local_root_span_id: [u8; 8],
 
     /// HTTP route (e.g., "/do_work")
     /// Capturing this as an example of something that will sometimes
     /// be there and will be useful on the reader side to make sense
     /// of the captured thread local data, even in the absence of
     /// a sampled trace to correlate to.
-    pub http_route: Option<String>,
+    pub http_route: Option<&'a str>,
 }
 
-impl std::fmt::Display for TraceContext {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "trace_id={}, span_id={}, local_root_span_id={}",
-            self.trace_id, self.span_id, self.local_root_span_id
-        )?;
-
-        if let Some(ref route) = self.http_route {
-            write!(f, ", http_route={}", route)?;
-        }
-
-        Ok(())
-    }
-}
-
-/// A thing that consumes TraceContext and writes it out someplace. Typically this
+/// A thing that consumes ExtractedSpanData and writes it out someplace. Typically this
 /// someplace would be our polarsignals TL impl, or the console!
 pub trait ContextLabelWriter: Send + Sync + 'static {
     /// Write labels. This is called every time we enter an OTel context, so
     /// impls should be snappy.
-    fn write_labels(&self, context: &TraceContext);
+    ///
+    /// The data parameter provides zero-copy borrowed access to pre-formatted
+    /// trace IDs and metadata, avoiding allocations in the hot path.
+    fn write_labels(&self, data: &ExtractedSpanData);
 
     /// Clear all labels
     ///

@@ -55,4 +55,5 @@ criterion = "0.5.1"
 
 [features]
 test-utils = ["dd-trace/test-utils", "data-pipeline/test-utils"]
-context-observer = ["custom-labels"]
+active-span-metadata = []
+context-observer = ["custom-labels", "active-span-metadata"]

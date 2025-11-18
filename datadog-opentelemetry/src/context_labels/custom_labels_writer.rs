@@ -1,7 +1,7 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use super::writer::{ContextLabelWriter, TraceContext};
+use super::writer::{ContextLabelWriter, ExtractedSpanData};
 
 /// Writer implementation using Polar Signals custom-labels TL lib.
 #[cfg(feature = "context-observer")]
@@ -24,13 +24,13 @@ impl Default for CustomLabelsWriter {
 
 #[cfg(feature = "context-observer")]
 impl ContextLabelWriter for CustomLabelsWriter {
-    fn write_labels(&self, context: &TraceContext) {
+    fn write_labels(&self, data: &ExtractedSpanData) {
         let thread_id = std::thread::current().id();
         dd_trace::dd_debug!(
-            "write_labels called on thread {:?} - trace_id={}, span_id={}",
+            "write_labels called on thread {:?} - trace_id={:032x}, span_id={:016x}",
             thread_id,
-            context.trace_id,
-            context.span_id
+            u128::from_be_bytes(data.trace_id),
+            u64::from_be_bytes(data.span_id)
         );
 
         // Initialize the labelset if it doesn't exist for this thread yet
@@ -51,11 +51,12 @@ impl ContextLabelWriter for CustomLabelsWriter {
         // swap of the labelset.
         let labelset = &custom_labels::CURRENT_LABELSET;
 
-        labelset.set("trace_id", &context.trace_id);
-        labelset.set("span_id", &context.span_id);
-        labelset.set("local_root_span_id", &context.local_root_span_id);
+        // Store raw byte arrays directly - the profiler will handle formatting
+        labelset.set("trace_id", &data.trace_id[..]);
+        labelset.set("span_id", &data.span_id[..]);
+        labelset.set("local_root_span_id", &data.local_root_span_id[..]);
 
-        if let Some(ref route) = context.http_route {
+        if let Some(route) = data.http_route {
             labelset.set("http_route", route);
         }
 
