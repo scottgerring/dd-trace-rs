@@ -29,7 +29,8 @@ hashbrown = { workspace = true }
 
 # Used to write our Thread Locals with context info
 # See https://github.com/polarsignals/custom-labels/
-custom-labels = { version = "0.4", optional = true }
+custom-labels = { path = "../../custom-labels", optional = true }
+process-context = { path = "../../process-context", optional = true }
 
 # Libdatadog dependencies
 data-pipeline = { workspace = true }
@@ -56,4 +57,4 @@ criterion = "0.5.1"
 [features]
 test-utils = ["dd-trace/test-utils", "data-pipeline/test-utils"]
 active-span-metadata = []
-context-observer = ["custom-labels", "active-span-metadata"]
+context-observer = ["custom-labels", "process-context", "active-span-metadata"]

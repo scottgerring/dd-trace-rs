@@ -2,16 +2,28 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use super::writer::{ContextLabelWriter, ExtractedSpanData};
+use crate::v2_keys;
 
-/// Writer implementation using Polar Signals custom-labels TL lib.
+/// Writer implementation using the custom-labels lib
+///
+/// For the sake of giving a complete, standalone demo, this writes both the PolarSignals v1
+/// format (custom labelsets), and our V2 format. This is obviously not a thing to do for
+/// Serious Production Code!
+/// 
 #[cfg(feature = "context-observer")]
-pub struct CustomLabelsWriter;
+pub struct CustomLabelsWriter {
+    http_route_key: custom_labels::v2::KeyHandle,
+    some_custom_field_key: custom_labels::v2::KeyHandle,
+}
 
 #[cfg(feature = "context-observer")]
 impl CustomLabelsWriter {
     /// Create a new CustomLabelsWriter
     pub fn new() -> Self {
-        Self
+        Self {
+            http_route_key: custom_labels::v2::KeyHandle::new(v2_keys::HTTP_ROUTE_IDX),
+            some_custom_field_key: custom_labels::v2::KeyHandle::new(v2_keys::SOME_CUSTOM_FIELD_IDX),
+        }
     }
 }
 
@@ -32,6 +44,10 @@ impl ContextLabelWriter for CustomLabelsWriter {
             u128::from_be_bytes(data.trace_id),
             u64::from_be_bytes(data.span_id)
         );
+
+        //
+        // ** PolarSignals / V1 format **
+        //
 
         // Initialize the labelset if it doesn't exist for this thread yet
         unsafe {
@@ -60,28 +76,54 @@ impl ContextLabelWriter for CustomLabelsWriter {
             labelset.set("http_route", route);
         }
 
-        dd_trace::dd_debug!("Labels written successfully");
+        dd_trace::dd_debug!("V1 labels written successfully");
+
+        //
+        // V2 format
+        //
+
+        let http_route_key = self.http_route_key;
+        let some_custom_field_key = self.some_custom_field_key;
+        custom_labels::v2::set_current_record(Some(&data.span_id), |builder| {
+            builder.set_trace(&data.trace_id, &data.span_id, &data.local_root_span_id);
+            if let Some(route) = data.http_route {
+                let _ = builder.set_attr_str(http_route_key, route);
+            }
+            // Always set some_custom_field to "123abc"
+            let _ = builder.set_attr_str(some_custom_field_key, "123abc");
+        });
+
+        dd_trace::dd_debug!("V2 record written successfully");
     }
 
     fn clear_labels(&self) {
         dd_trace::dd_debug!("clear_labels called");
 
-        // Only clear if labelset exists (defensive check)
+        //
+        // v1 format
+        //
+
         unsafe {
             if custom_labels::sys::labelset_current().is_null() {
-                dd_trace::dd_debug!("No labelset to clear");
-                return;
+                dd_trace::dd_debug!("No V1 labelset to clear");
+            } else {
+                let labelset = &custom_labels::CURRENT_LABELSET;
+
+                // Delete all labels we set
+                labelset.delete("trace_id");
+                labelset.delete("span_id");
+                labelset.delete("local_root_span_id");
+                labelset.delete("http_route");
+
+                dd_trace::dd_debug!("V1 labels cleared successfully");
             }
         }
 
-        let labelset = &custom_labels::CURRENT_LABELSET;
+        //
+        // v2 format
+        //
 
-        // Delete all labels we set
-        labelset.delete("trace_id");
-        labelset.delete("span_id");
-        labelset.delete("local_root_span_id");
-        labelset.delete("http_route");
-
-        dd_trace::dd_debug!("Labels cleared successfully");
+        custom_labels::v2::clear_current_record();
+        dd_trace::dd_debug!("V2 record cleared successfully");
     }
 }

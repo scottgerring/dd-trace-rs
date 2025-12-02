@@ -75,6 +75,16 @@ pub enum ContextLabelWriterType {
     Custom,
 }
 
+// v2 key indices for custom-labels TL records
+// Only custom attributes need indices - trace_id, span_id, local_root_span_id
+// are first-class fields in the v2 TL record header
+#[cfg(feature = "context-observer")]
+pub mod v2_keys {
+    pub const HTTP_ROUTE_IDX: u8 = 0;
+    pub const SOME_CUSTOM_FIELD_IDX: u8 = 1;
+    pub const MAX_RECORD_SIZE: u64 = 64;
+}
+
 mod ddtrace_transform;
 mod sampler;
 mod span_exporter;
@@ -157,6 +167,32 @@ impl DatadogTracingBuilder {
                 }
                 #[cfg(feature = "context-observer")]
                 ContextLabelWriterType::Custom => {
+                    // Initialize process-context with TLS key table configuration
+                    // Only custom attributes need key indices - trace_id, span_id,
+                    // local_root_span_id are first-class fields in the v2 record header
+                    use process_context::tls::ProcessContextTlsExt;
+                    use process_context::{ProcessContext, ProcessContextWriter};
+                    use v2_keys::*;
+
+                    let ctx = ProcessContext::new()
+                        .with_resource("service.name", "dd-trace-rs-demo")
+                        .with_resource("telemetry.sdk.name", "dd-trace-rs")
+                        .with_tls_config(
+                            [
+                                (HTTP_ROUTE_IDX, "http_route"),
+                                (SOME_CUSTOM_FIELD_IDX, "some_custom_field"),
+                            ],
+                            MAX_RECORD_SIZE,
+                        );
+                    // Publish and intentionally leak the writer so the mapping lives
+                    // for the entire process lifetime
+                    if let Ok(writer) = ProcessContextWriter::publish(&ctx) {
+                        std::mem::forget(writer);
+                    }
+
+                    // Initialize custom-labels v2
+                    custom_labels::v2::setup(MAX_RECORD_SIZE);
+
                     context_labels::init_context_labels(
                         context_labels::CustomLabelsWriter::new(),
                         registry.clone(),
